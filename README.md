@@ -1,6 +1,7 @@
 # TECHIN 510 Lab 5 Seattle Events Dashboard
 
 Jassie He
+
 This is a Streamlit-based web application that displays information about events happening in Seattle. It uses data scraped from online sources, stored in a PostgreSQL database, and presents various insights about event categories, dates, and weather conditions.
 
 # How to Run
