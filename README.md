@@ -41,13 +41,14 @@ Start the Streamlit app:
 ```bash
 streamlit run app.py
 ```
+Access the web interface via http://localhost:8501.
 
-## Access the web interface via http://localhost:8501.
 
 # Components
 app.py: Main application script.
 scraper.py: For fetching and storing event data.
 db.py: Handles database connectivity.
+
 
 # Notes
 Customize the appearance and functionality of the dashboard through Streamlit's widgets and layout options.
