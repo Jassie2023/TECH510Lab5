@@ -1,112 +1,118 @@
 import streamlit as st
+import pandas as pd
 import pandas.io.sql as sqlio
 import altair as alt
 import folium
 from streamlit_folium import st_folium
-import pandas as pd
-import ast
+from sqlalchemy import create_engine
 
+# Assuming db.py contains your database connection setup
 from db import conn_str
-df = sqlio.read_sql_query("SELECT * FROM events", conn_str)
 
-st.title("Seattle Events")
+# Establishing a connection to your database
+engine = create_engine(conn_str)
 
-# 1-a. What category of events are most common in Seattle?
-st.subheader('💡 What category of events are most common in Seattle?')
-st.altair_chart(
-    alt.Chart(df).mark_bar().encode(x="count()", y=alt.Y("category").sort('-x')).interactive(),
-    use_container_width=True,
-)
+# Function to load data from the database
+def load_data():
+    query = "SELECT * FROM events"
+    df = sqlio.read_sql_query(query, conn_str)
+    df['date'] = pd.to_datetime(df['date'])
+    
+    # Ensure 'weathercondition' column exists, if not, initialize it with 'Not Available'
+    if 'weathercondition' not in df.columns:
+        df['weathercondition'] = 'Not Available'
+    
+    # Check if 'geolocation' column exists, if not, initialize it with None values
+    if 'geolocation' not in df.columns:
+        df['geolocation'] = None
+    else:
+        # If 'geolocation' column exists, ensure it's in string format
+        df['geolocation'] = df['geolocation'].astype(str)
+    
+    return df
 
-# 1-b. What month has the most number of events?
-st.subheader('💡 What month has the most number of events?')
-df['date'] = pd.to_datetime(df['date'])
-df['month'] = df['date'].dt.month
-df['year'] = df['date'].dt.year
-# Group by month and year, then count the number of events
-monthly_events = df.groupby(['year', 'month']).size().reset_index(name='counts')
-# Create a new column for displaying the month and year together for better clarity
-monthly_events['month_year'] = monthly_events['month'].astype(str) + '/' + monthly_events['year'].astype(str)
+# Function to render charts
+def render_event_categories_chart(df):
+    chart = alt.Chart(df).mark_bar().encode(
+        x="count()",
+        y=alt.Y("category", sort='-x')
+    ).interactive()
+    st.altair_chart(chart, use_container_width=True)
 
-chart = alt.Chart(monthly_events).mark_bar().encode(
-    x=alt.X('month_year:N', sort='-y', title='Month-Year'),
-    y=alt.Y('counts:Q', title='Number of Events'),
-    tooltip=['month_year', 'counts']
-).interactive()
-st.altair_chart(chart, use_container_width=True)
+def render_event_months_chart(df):
+    df['month_year'] = df['date'].dt.strftime('%Y-%m')
+    chart = alt.Chart(df).mark_bar().encode(
+        x=alt.X('month_year:N', sort='-y', title='Month-Year'),
+        y='count()'
+    ).interactive()
+    st.altair_chart(chart, use_container_width=True)
 
-# 1-c. What day of the week has the most number of events?
-st.subheader('💡 What day of the week has the most number of events?')
-df['date'] = pd.to_datetime(df['date'])
-df['day_of_week'] = df['date'].dt.day_name()
-day_order = {"Monday": 0, "Tuesday": 1, "Wednesday": 2, "Thursday": 3, "Friday": 4, "Saturday": 5, "Sunday": 6}
-df['day_of_week_num'] = df['day_of_week'].map(day_order)
-weekly_events = df.groupby(['day_of_week', 'day_of_week_num'], as_index=False).size()
-weekly_events = weekly_events.sort_values('day_of_week_num')
+def render_event_weekdays_chart(df):
+    df['day_of_week'] = df['date'].dt.day_name()
+    chart = alt.Chart(df).mark_bar().encode(
+        x=alt.X('day_of_week:N', sort=None, title='Day of the Week'),
+        y='count()'
+    ).interactive()
+    st.altair_chart(chart, use_container_width=True)
 
-chart = alt.Chart(weekly_events).mark_bar().encode(
-    x=alt.X('day_of_week:N', sort=alt.SortField('day_of_week_num', order='ascending'), title='Day of the Week'),
-    y=alt.Y('size:Q', title='Number of Events'),
-    tooltip=['day_of_week', 'size']
-).interactive()
+# Function to apply filters and return filtered DataFrame
+def filter_data(df, category, date_range, location, weather_condition):
+    filtered_df = df.copy()
+    if category != 'All':
+        filtered_df = filtered_df[filtered_df['category'] == category]
+    
+    # Convert selected_date_range to date objects for comparison
+    if date_range:
+        start_date, end_date = date_range[0], date_range[1]
+        filtered_df = filtered_df[(filtered_df['date'].dt.date >= start_date) & (filtered_df['date'].dt.date <= end_date)]
 
-st.altair_chart(chart, use_container_width=True)
+    if location != 'All':
+        filtered_df = filtered_df[filtered_df['location'] == location]
+    if weather_condition != 'All':
+        filtered_df = filtered_df[filtered_df['weathercondition'] == weather_condition]
+    return filtered_df
 
-# Create a copy of the DataFrame for filtering
-filtered_df = df.copy()
-
-# 2-a. Dropdown to Filter by Category
-categories = df['category'].unique()
-selected_category = st.selectbox("Select a category", options=categories)
-filtered_df = filtered_df[filtered_df['category'] == selected_category]
-
-# 2-b. Date Range Selector for Event Date
-min_date = df['date'].min().date()
-max_date = df['date'].max().date()
-selected_date_range = st.date_input("Select date range", value=[min_date, max_date], min_value=min_date, max_value=max_date)
-
-# Apply date range filter
-filtered_df = filtered_df[(filtered_df['date'].dt.date >= selected_date_range[0]) & (filtered_df['date'].dt.date <= selected_date_range[1])]
-
-# 2-c. Dropdown to Filter by Location
-locations = ['All'] + list(df['location'].unique())
-selected_location = st.selectbox("Select a location", options=locations)
-
-if selected_location != 'All':
-    filtered_df = filtered_df[filtered_df['location'] == selected_location]
-
-# 2-d. (Optional) Filter by Weather Condition
-weather_conditions = ['All'] + list(df['weathercondition'].unique())
-selected_weather_condition = st.selectbox("Select a weather condition", options=weather_conditions)
-
-if selected_weather_condition != 'All':
-    filtered_df = filtered_df[filtered_df['weathercondition'] == selected_weather_condition]
-
-# Display the filtered DataFrame
-st.write(filtered_df)
-
-
-# Initialize the map centered around Seattle
-m = folium.Map(location=[47.6504529, -122.3499861], zoom_start=12)
-
-# Loop through the filtered DataFrame and add a marker for each event
-for idx, row in filtered_df.iterrows():
-    # Check if geolocation data exists and is not null
-    if pd.notnull(row['geolocation']):
-        # Remove curly braces and convert the geolocation string to a tuple of floats
-        try:
-            # Removing curly braces and converting to a proper tuple format
-            geolocation_str = row['geolocation'].strip("{}")
-            # Splitting the string by comma and converting each part to float
-            lat, lon = map(float, geolocation_str.split(','))
-            # Adding the marker to the map
+# Create and display the map
+def display_map(df):
+    map_center = [47.6062, -122.3321]  # Center of Seattle
+    m = folium.Map(location=map_center, zoom_start=10)
+    for idx, row in df.iterrows():
+        if row['geolocation'] and row['geolocation'] != 'None':
+            lat, lon = map(float, row['geolocation'].strip('()').split(','))
             folium.Marker(
-                location=[lat, lon],
+                [lat, lon],
                 popup=f"{row['title']} - {row['date'].strftime('%Y-%m-%d')}",
             ).add_to(m)
-        except ValueError:
-            print(f"Error parsing geolocation for row {idx}: {row['geolocation']}")
+    st_folium(m, width=725, height=500)
 
-# Display the map in Streamlit
-st_folium(m, width=800, height=600)
+def main():
+    st.title("Seattle Events")
+
+    df = load_data()
+
+    # Filters
+    categories = ['All'] + sorted(df['category'].unique())
+    locations = ['All'] + sorted(df['location'].unique())
+    weather_conditions = ['All'] + sorted(df.get('weathercondition', pd.Series(['Not Available'])).unique())
+
+    selected_category = st.sidebar.selectbox("Select a category", categories, index=0, key='category_select')
+    selected_location = st.sidebar.selectbox("Select a location", locations, index=0, key='location_select')
+    selected_weather_condition = st.sidebar.selectbox("Select a weather condition", weather_conditions, index=0, key='weather_condition_select')
+    min_date, max_date = df['date'].min().date(), df['date'].max().date()
+    selected_date_range = st.sidebar.date_input("Select date range", [min_date, max_date])
+
+    filtered_df = filter_data(df, selected_category, selected_date_range, selected_location, selected_weather_condition)
+
+    # Render charts
+    render_event_categories_chart(filtered_df)
+    render_event_months_chart(filtered_df)
+    render_event_weekdays_chart(filtered_df)
+
+    st.dataframe(filtered_df)
+
+    display_map(filtered_df)
+
+if __name__ == "__main__":
+    main()
+
 
